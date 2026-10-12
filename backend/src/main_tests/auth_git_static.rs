@@ -1150,7 +1150,10 @@ async fn saturated_websocket_queue_invalidates_connection() {
         .clone()
         .expect("saturation should include an invalidation reason");
     assert!(reason.contains("test-saturation"));
-    assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
+    assert!(matches!(
+        rx.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
 }
 
 #[test]
@@ -2539,7 +2542,7 @@ fn maps_session_item_notifications_for_stream_clients() {
                     "command": ["sed", "-n", "1,20p", "src/main.rs"],
                     "cwd": "/tmp/project",
                     "title": "Command",
-                    "detailState": "deferred",
+                    "detailState": "inline",
                     "detailPreview": "sed -n 1,20p src/main.rs"
                 }
             }
@@ -2579,7 +2582,7 @@ fn maps_session_item_notifications_use_item_id_when_payload_omits_item_id() {
                     "command": ["rg", "-n", "queue", "src/routes/+page.svelte"],
                     "cwd": "/tmp/project",
                     "title": "Command",
-                    "detailState": "deferred",
+                    "detailState": "inline",
                     "detailPreview": "rg -n queue src/routes/+page.svelte"
                 }
             }

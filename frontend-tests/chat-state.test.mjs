@@ -469,3 +469,39 @@ test("a fully hydrated turn clears its deferred item count", () => {
   assert.equal(merged.hiddenItemCount, 0);
   assert.equal(merged.items.length, 2);
 });
+
+test("native string command survives output deltas, completion and reconnect snapshots", () => {
+  let state = createConversationState(detailWithItems([]));
+  const event = (method, params) => { state = applyStreamEvent(state, {kind:"notification", method, params:{turnId:"turn-1",...params}}); };
+  event("item/started", {item:{id:"shell-1",type:"commandExecution",command:"python3 report.py",cwd:"/projects/demo",status:"inProgress",aggregatedOutput:""}});
+  event("item/commandExecution/outputDelta", {itemId:"shell-1",delta:"saved report.txt\n"});
+  event("item/completed", {item:{id:"shell-1",type:"commandExecution",command:"python3 report.py",exitCode:0,aggregatedOutput:"saved report.txt\n"}});
+  const item=state.thread.turns[0].items.find(i=>i.id==="shell-1");
+  assert.equal(item.command,"python3 report.py");
+  assert.equal(item.aggregatedOutput,"saved report.txt\n");
+  const stale = detailWithItems([{id:"shell-1",type:"commandExecution",command:"python3 report.py",detailState:"deferred"}]);
+  const restored=mergeConversationState(state,stale);
+  assert.equal(restored.thread.turns[0].items[0].command,"python3 report.py");
+  assert.match(restored.thread.turns[0].items[0].aggregatedOutput,/saved report/);
+});
+
+test("reasoning summaries accept supplied structured text without object placeholders", () => {
+  let state=createConversationState(detailWithItems([]));
+  state=applyStreamEvent(state,{kind:"notification",method:"item/completed",params:{turnId:"turn-1",item:{id:"reasoning-1",type:"reasoning",summary:[{type:"summary_text",text:"Checking the input file."}],content:[{type:"reasoning_text",text:"Provider supplied text."}]}}});
+  const item=state.thread.turns[0].items[0];
+  assert.deepEqual(item.summary,["Checking the input file."]);
+  assert.equal(item.text,"Provider supplied text.");
+  assert.ok(!JSON.stringify(item.summary).includes("[object Object]"));
+});
+
+test("tool progress and file output remain visible after completion", () => {
+  let state=createConversationState(detailWithItems([]));
+  for(const [method,params] of [
+    ["item/started",{item:{id:"mcp1",type:"mcpToolCall",tool:"lookup"}}],
+    ["item/mcpToolCall/progress",{itemId:"mcp1",message:"Fetched 2 entries"}],
+    ["item/completed",{item:{id:"mcp1",type:"mcpToolCall",status:"completed",result:{ok:true}}}],
+    ["item/fileChange/outputDelta",{itemId:"patch1",delta:"Updated result.md"}],
+  ]) state=applyStreamEvent(state,{kind:"notification",method,params:{turnId:"turn-1",...params}});
+  assert.deepEqual(state.thread.turns[0].items.find(i=>i.id==="mcp1").progressMessages,["Fetched 2 entries"]);
+  assert.equal(state.thread.turns[0].items.find(i=>i.id==="patch1").aggregatedOutput,"Updated result.md");
+});

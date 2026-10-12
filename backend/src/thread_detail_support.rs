@@ -521,7 +521,10 @@ fn command_item_from_rollout_function_call(payload: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or("tool");
     let arguments = parse_function_call_arguments(payload);
-    let mut item = if matches!(name, "exec" | "exec_command" | "write_stdin") {
+    let mut item = if matches!(name, "exec_command" | "write_stdin")
+        || (name == "exec"
+            && (arguments.get("cmd").is_some() || arguments.get("command").is_some()))
+    {
         json!({
             "id": call_id,
             "type": "commandExecution",
@@ -991,6 +994,7 @@ fn rollout_tail_line_may_affect_completion(line: &str) -> bool {
             "task_started",
             "user_message",
             "agent_message",
+            "item_completed",
             "task_complete",
             r#""type":"error""#,
             r#""type": "error""#,
@@ -1224,10 +1228,6 @@ pub(crate) fn build_turn_window_from_rollout_records(
             }
             ("event_msg", "item_completed") => {
                 let item = payload.get("item").unwrap_or(&Value::Null);
-                let item_type = item.get("type").and_then(Value::as_str);
-                if !matches!(item_type, Some("context_compaction" | "contextCompaction")) {
-                    continue;
-                }
                 let turn_id = payload.get("turn_id").and_then(Value::as_str);
                 let index = ensure_rollout_turn_index(
                     &mut turns,
@@ -1235,32 +1235,21 @@ pub(crate) fn build_turn_window_from_rollout_records(
                     turn_id,
                     timestamp_ms,
                 );
-                let turn_item_prefix = turns[index]
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("turn")
-                    .to_string();
-                let compaction_id = item
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| {
-                        format!("{turn_item_prefix}:context-compaction:{record_identity}")
-                    });
-                let updated = update_rollout_item(&mut turns[index], &compaction_id, |existing| {
-                    if let Some(object) = existing.as_object_mut() {
-                        object.insert("status".to_string(), json!("completed"));
-                    }
-                });
-                if !updated {
-                    push_rollout_item(
-                        &mut turns[index],
-                        context_compaction_item_from_rollout_payload(
-                            item,
-                            compaction_id,
-                            "completed",
-                        ),
+                let prefix = turns[index]["id"].as_str().unwrap_or("turn").to_string();
+                let mut normalized =
+                    normalize_session_item_payload(item, &prefix, record_identity as usize);
+                if normalized["type"] == "contextCompaction" {
+                    normalized = context_compaction_item_from_rollout_payload(
+                        item,
+                        normalized["id"].as_str().unwrap_or_default().to_string(),
+                        "completed",
                     );
+                }
+                let id = normalized["id"].as_str().unwrap_or_default().to_string();
+                if !update_rollout_item(&mut turns[index], &id, |existing| {
+                    *existing = normalized.clone()
+                }) {
+                    push_rollout_item(&mut turns[index], normalized);
                 }
             }
             ("event_msg", "agent_message") => {
@@ -1580,6 +1569,17 @@ pub(crate) fn build_turn_window_from_rollout_records(
                                 .filter(|value| !value.is_null())
                             {
                                 object.insert("result".to_string(), result.clone());
+                                if object.get("type").and_then(Value::as_str)
+                                    == Some("commandExecution")
+                                {
+                                    object.insert(
+                                        "aggregatedOutput".to_string(),
+                                        json!(
+                                            value_text(result)
+                                                .unwrap_or_else(|| result.to_string())
+                                        ),
+                                    );
+                                }
                             }
                             copy_rollout_item_metadata(payload, object);
                         }
@@ -3287,4 +3287,64 @@ pub(crate) async fn search_session_turns_payload(
         "nextCursor": (end < matches.len()).then(|| end.to_string()),
         "totalMatches": matches.len()
     }))
+}
+
+#[cfg(test)]
+mod workbench_rollout_tests {
+    use super::*;
+    #[test]
+    fn workbench_native_completed_items_preserve_order_output_and_identity() {
+        let payloads = vec![
+            json!({"type":"task_started","turn_id":"t1"}),
+            json!({"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"Make a file"}]}}),
+            json!({"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","id":"a1","phase":"commentary","content":[{"type":"Text","text":"Checking the project"}]}}),
+            json!({"type":"item_completed","turn_id":"t1","item":{"type":"CommandExecution","id":"c1","command":["pwd"],"aggregated_output":"/projects/example\n","exit_code":0,"status":"completed"}}),
+            json!({"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","id":"a2","phase":"final_answer","content":[{"type":"Text","text":"Done"}]}}),
+            json!({"type":"task_complete","turn_id":"t1","last_agent_message":"Done"}),
+        ];
+        let records = payloads
+            .into_iter()
+            .enumerate()
+            .map(|(i, payload)| RolloutRecord {
+                absolute_offset: i as u64,
+                value: json!({"type":"event_msg","payload":payload}),
+            })
+            .collect();
+        let window = build_turn_window_from_rollout_records(
+            RolloutRecordWindow {
+                records,
+                truncated: false,
+                corruption_detected: false,
+                trailing_incomplete: false,
+                changed_during_read: false,
+                file_size: 100,
+                modified_at_ms: None,
+            },
+            10,
+        );
+        assert_eq!(window.turns.len(), 1);
+        let items = window.turns[0]["items"].as_array().unwrap();
+        assert_eq!(
+            items
+                .iter()
+                .map(|i| i["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["u1", "a1", "c1", "a2"]
+        );
+        assert_eq!(items[1]["text"], "Checking the project");
+        assert_eq!(items[2]["aggregatedOutput"], "/projects/example\n");
+        assert_eq!(items[2]["exitCode"], 0);
+        assert_eq!(items[3]["text"], "Done");
+        assert!(rollout_tail_line_may_affect_completion(
+            r#"{"type":"event_msg","payload":{"type":"item_completed"}}"#
+        ));
+    }
+    #[test]
+    fn workbench_exec_wrapper_is_a_tool_not_a_shell_command() {
+        let item = command_item_from_rollout_function_call(
+            &json!({"type":"custom_tool_call","call_id":"x1","name":"exec","input":"text(await tools.exec_command({cmd:'pwd'}))"}),
+        );
+        assert_eq!(item["type"], "dynamicToolCall");
+        assert_eq!(item["tool"], "exec");
+    }
 }

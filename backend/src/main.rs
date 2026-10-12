@@ -82,6 +82,7 @@ mod http_router_support;
 mod memory_support;
 mod notification_state_support;
 mod parser_diagnostics_support;
+mod project_support;
 mod queue_runtime_support;
 mod relay_support;
 mod request_cache_support;
@@ -148,6 +149,7 @@ use http_router_support::*;
 use memory_support::*;
 use notification_state_support::*;
 use parser_diagnostics_support::*;
+use project_support::*;
 use queue_runtime_support::*;
 use relay_support::*;
 use request_cache_support::*;
@@ -190,6 +192,22 @@ use ws_transport_support::*;
 
 fn main() -> Result<()> {
     let config = Arc::new(Config::from_env()?);
+    if let Some(root) = projects_root(&config) {
+        anyhow::ensure!(
+            root.is_absolute(),
+            "CODEX_WEBUI_PROJECTS_ROOT must be absolute"
+        );
+        let real = fs::canonicalize(&root).context("Project root is unavailable")?;
+        anyhow::ensure!(
+            real.is_dir()
+                && config
+                    .allowed_roots
+                    .iter()
+                    .filter_map(|p| fs::canonicalize(p).ok())
+                    .any(|p| real.starts_with(p)),
+            "Project root must be a directory inside allowed roots"
+        );
+    }
     install_panic_logger(config.clone());
 
     let gateway_log_dir = runtime_logs_dir(&config);

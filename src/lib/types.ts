@@ -72,6 +72,7 @@ export type SessionSummary = {
 };
 
 export type SessionSummaryFilter = {
+  cwd?: string;
   pinnedOnly: boolean;
   runningOnly: boolean;
   queuedOnly: boolean;
@@ -213,6 +214,7 @@ export type SessionListResponse = SessionListPayload | CacheValidationPayload | 
 export type AttachmentRecord = {
   id: string;
   originalName: string;
+  projectPath?: string | null;
   path: string;
   mimeType: string;
   size: number;

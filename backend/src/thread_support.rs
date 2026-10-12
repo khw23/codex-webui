@@ -827,6 +827,26 @@ pub(crate) async fn save_session_preferences_payload(
 ) -> ApiResult<Value> {
     let next_preferences =
         normalize_session_preferences_payload(state, profile_id, preferences).await?;
+    if projects_root(&state.config).is_some() {
+        let existing = with_ui_state_read(state, profile_id, |ui| {
+            Ok(ui
+                .get("preferencesByThreadId")
+                .and_then(|v| v.get(session_id))
+                .and_then(|v| v.get("cwd"))
+                .cloned())
+        })
+        .await?;
+        if existing
+            .as_ref()
+            .is_some_and(|cwd| Some(cwd) != next_preferences.get("cwd"))
+        {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "A session stays in its project. Create a new session to switch projects.",
+            ));
+        }
+    }
+
     with_ui_state_write(state, profile_id, |ui_state| {
         let Some(preferences_by_thread_id) = ui_state
             .get_mut("preferencesByThreadId")

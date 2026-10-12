@@ -1,7 +1,7 @@
 {
   "app_title": "Codex Web UI",
   "app_short_name": "Codex Web",
-  "new_thread": "New thread",
+  "new_thread": "新对话",
   "english": "English",
   "korean": "Korean",
   "loading": "Loading...",
@@ -248,7 +248,7 @@
   "recent_commits": "Recent commits",
   "diff": "Diff",
   "edit": "Edit",
-  "thread_title": "Thread title",
+  "thread_title": "对话标题",
   "restore_thread": "Restore thread",
   "archive_thread": "Archive thread",
   "chat": "Chat",
@@ -267,7 +267,7 @@
   "edit_in_composer": "Edit in composer",
   "branch_into_new_thread": "Fork into a new thread",
   "steps_count": "{count} steps",
-  "work_steps_count": "{count} work items",
+  "work_steps_count": "工作过程 · {count} 项",
   "approval_required": "Approval Required",
   "approve": "Approve",
   "session": "Session",
@@ -318,8 +318,8 @@
   "stop": "Stop",
   "steer": "Steer",
   "queue": "Queue",
-  "send": "Send",
-  "ask_codex": "Ask Codex...",
+  "send": "发送",
+  "ask_codex": "描述任务，或引用项目文件…",
   "queue_follow_up_placeholder": "Queue a follow-up...",
   "model": "Model",
   "speed": "速度",
@@ -575,5 +575,6 @@
   "allowed_root_paths": "允许的根路径",
   "scanning_folders": "正在扫描",
   "close_folder_picker": "关闭文件夹选择器",
-  "terminal_mobile_shortcuts": "移动终端快捷键"
+  "terminal_mobile_shortcuts": "移动终端快捷键",
+  "security_and_session": "权限与会话"
 }

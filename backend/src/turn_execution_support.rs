@@ -345,7 +345,11 @@ pub(crate) fn build_turn_input_payload(
     let mut image_attachment_paths = Vec::new();
 
     for attachment in attachments {
-        if let Some(path) = attachment.path.as_deref() {
+        if let Some(path) = attachment
+            .project_path
+            .as_deref()
+            .or(attachment.path.as_deref())
+        {
             let readable_root = Path::new(path)
                 .parent()
                 .unwrap_or_else(|| Path::new(path))
@@ -1943,6 +1947,12 @@ pub(crate) async fn send_turn_payload(
 
     let next_preferences =
         normalize_session_preferences_payload(state, profile_id, preferences).await?;
+    if projects_root(&state.config).is_some() {
+        let existing = with_ui_state_read(state, profile_id, |ui| Ok(ui.get("preferencesByThreadId").and_then(|v|v.get(session_id)).and_then(|v|v.get("cwd")).cloned())).await?;
+        if existing.as_ref().is_some_and(|cwd| Some(cwd) != next_preferences.get("cwd")) {
+            return Err(api_error(StatusCode::BAD_REQUEST, "A session stays in its project. Create a new session to switch projects."));
+        }
+    }
     let cwd = next_preferences
         .get("cwd")
         .and_then(Value::as_str)

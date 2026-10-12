@@ -367,6 +367,7 @@ pub(crate) fn attachment_payload_from_record(record: &StoredAttachmentRecord) ->
     json!({
         "id": record.id,
         "originalName": record.original_name,
+        "projectPath": record.project_path,
         "mimeType": record
             .mime_type
             .clone()
@@ -440,9 +441,10 @@ pub(crate) async fn save_uploaded_attachment_records(
             &attachment_id,
             &original_name,
         );
-        let record = StoredAttachmentRecord {
+        let mut record = StoredAttachmentRecord {
             id: attachment_id,
             original_name,
+            project_path: None,
             path: Some(file_path.display().to_string()),
             mime_type: Some(mime_type.clone()),
             size: Some(size),
@@ -459,6 +461,16 @@ pub(crate) async fn save_uploaded_attachment_records(
         )
         .await?;
         write_attachment_bytes_atomically(&file_path, &upload.bytes).await?;
+        record.project_path =
+            match copy_attachment_into_project(state, profile_id, session_id, &record).await {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = tokio_fs::remove_file(&file_path).await;
+                    return Err(error);
+                }
+            };
+        let metadata = serde_json::to_vec_pretty(&record)
+            .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         write_attachment_bytes_atomically(&meta_path, &metadata).await?;
         adjust_attachment_storage_usage_cache(
             state,
@@ -516,9 +528,10 @@ pub(crate) async fn store_uploaded_attachment_file(
         &attachment_id,
         &original_name,
     );
-    let record = StoredAttachmentRecord {
+    let mut record = StoredAttachmentRecord {
         id: attachment_id,
         original_name,
+        project_path: None,
         path: Some(file_path.display().to_string()),
         mime_type: Some(mime_type.clone()),
         size: Some(size),
@@ -541,6 +554,16 @@ pub(crate) async fn store_uploaded_attachment_file(
     if let Ok(parent_dir) = tokio_fs::File::open(&uploads_dir).await {
         let _ = parent_dir.sync_all().await;
     }
+    record.project_path =
+        match copy_attachment_into_project(state, profile_id, session_id, &record).await {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = tokio_fs::remove_file(&file_path).await;
+                return Err(error);
+            }
+        };
+    let metadata = serde_json::to_vec_pretty(&record)
+        .map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     write_attachment_bytes_atomically(&meta_path, &metadata).await?;
     adjust_attachment_storage_usage_cache(
         state,

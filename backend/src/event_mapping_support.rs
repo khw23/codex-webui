@@ -217,7 +217,19 @@ pub(crate) fn prepare_session_deferred_item_payload(
 }
 
 fn prepare_session_stream_item_payload(item: &Value, turn_id: &str) -> Value {
-    prepare_session_deferred_item_payload(item, turn_id, 0)
+    let mut normalized = normalize_session_item_payload(item, turn_id, 0);
+    if serde_json::to_vec(&normalized).is_ok_and(|bytes| bytes.len() <= 64 * 1024) {
+        let mut payload = prepare_session_deferred_item_payload(item, turn_id, 0);
+        if let (Some(target), Some(source)) = (payload.as_object_mut(), normalized.as_object_mut())
+        {
+            target.extend(source.clone());
+        }
+        payload["detailState"] = json!("inline");
+        payload
+    } else {
+        // Large output remains available through the existing item-detail API.
+        prepare_session_deferred_item_payload(item, turn_id, 0)
+    }
 }
 
 const COMPUTER_FRAME_IMAGE_URL_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -598,5 +610,30 @@ pub(crate) fn map_app_server_global_notification(
             "params": notification.params
         })),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod workbench_event_tests {
+    use super::*;
+    #[test]
+    fn workbench_small_tool_results_are_delivered_inline() {
+        let notification = AppServerNotification {
+            method: "item/completed".to_string(),
+            params: json!({"threadId":"project-thread", "turnId":"t1", "item":{"id":"c1","type":"commandExecution","command":"pwd","aggregatedOutput":"/projects/demo\n","exitCode":0}}),
+        };
+        let event = map_app_server_session_notification(&notification).unwrap();
+        assert_eq!(
+            event["params"]["item"]["aggregatedOutput"],
+            "/projects/demo\n"
+        );
+        assert_eq!(event["params"]["item"]["detailState"], "inline");
+    }
+    #[test]
+    fn workbench_large_results_keep_the_deferred_detail_route() {
+        let item = json!({"id":"c1","type":"commandExecution","command":"big-output","aggregatedOutput":"a".repeat(100_000)});
+        let payload = prepare_session_stream_item_payload(&item, "t1");
+        assert_eq!(payload["detailState"], "deferred");
+        assert!(payload.get("aggregatedOutput").is_none());
     }
 }

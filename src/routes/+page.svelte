@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ProjectSidebar from "$lib/components/ProjectSidebar.svelte";
+  import "$lib/workbench.css";
   import {
     Menu,
     Plus,
@@ -167,7 +169,7 @@
   } from "$lib/types";
 
   const SESSION_LIST_BROWSER_CACHE_SCHEMA_VERSION = 2;
-  const SESSION_DETAIL_BROWSER_CACHE_SCHEMA_VERSION = 2;
+  const SESSION_DETAIL_BROWSER_CACHE_SCHEMA_VERSION = 3;
   const SESSION_LIST_VERSION_HINT_LIMIT = 240;
   const SESSION_DETAIL_VERSION_HINT_LIMIT = 5_000;
   const transcriptTurnEstimatedHeight = 420;
@@ -369,6 +371,72 @@
   let requestAnswers = $state<Record<string, Record<string, string>>>({});
   let rawRequestResponses = $state<Record<string, string>>({});
   let pendingSessionEvents = $state<Record<string, StreamEvent[]>>({});
+  let workbenchEnabled = $state(false);
+  let projectRoot = $state("");
+  let projects = $state<Array<{name:string;path:string}>>([]);
+  let selectedProject = $state("");
+  let processExpanded = $state(false);
+  let projectsLoading = false;
+  async function refreshProjects() {
+    if (projectsLoading || authenticated !== true) return;
+    projectsLoading = true;
+    try {
+      const payload = await api.listProjects();
+      workbenchEnabled = payload.enabled;
+      projectRoot = payload.root ?? "";
+      projects = payload.projects;
+      const cwd = conversation?.preferences.cwd;
+      if (cwd && projects.some(p=>p.path===cwd)) selectedProject=cwd;
+      if (!selectedProject && projects.length) selectedProject=projects[0].path;
+      if (workbenchEnabled && !selectedSessionId && conversation && selectedProject) {
+        conversation = {...conversation, preferences:{...conversation.preferences,cwd:selectedProject}};
+      }
+    } catch (error) { errorText = describeError(error); }
+    finally {projectsLoading=false;}
+  }
+  function selectProject(path:string) {
+    selectedProject=path;
+    sessionFilter={...sessionFilter,cwd:path};
+    scheduleSessionRefresh(0);
+    if (config) activateDraftSession({...config.defaults,cwd:path});
+    mobileSidebarOpen=false;
+  }
+  async function createProject(name:string) {
+    const project = await api.createProject(name);
+    await refreshProjects();
+    selectProject(project.path);
+  }
+  function referenceProjectFile(path:string) {
+    draft = `${draft}${draft ? "\n" : ""}请参考这个项目文件：${path}`;
+    activeWorkspaceTabId="chat";
+    mobileSidebarOpen=false;
+    queueMicrotask(()=>composerTextareaElement?.focus());
+  }
+  async function showProcessDetails() {
+    processExpanded = !processExpanded;
+    if (processExpanded && conversation) {
+      const sessionId=selectedSessionId;
+      for (const turn of conversation.thread.turns.slice(-8)) {
+        await loadTurnDetails(turn.id);
+        if (sessionId!==selectedSessionId || !processExpanded) return;
+        const items=conversation?.thread.turns.find(t=>t.id===turn.id)?.items ?? [];
+        for (const item of items.filter(i=>i.detailState==="deferred").slice(0,80)) {
+          await loadItemDetail(turn.id,item.id);
+          if (sessionId!==selectedSessionId || !processExpanded) return;
+        }
+      }
+    }
+  }
+  $effect(()=>{
+    const cwd=conversation?.preferences.cwd;
+    if(workbenchEnabled && cwd && projects.some(p=>p.path===cwd)) {
+      selectedProject=cwd;
+      if(sessionFilter.cwd!==cwd){sessionFilter={...sessionFilter,cwd};scheduleSessionRefresh(0);}
+    }
+  });
+  $effect(()=>{
+    if(authenticated===true && connectionState==="connected") void refreshProjects();
+  });
   let expandedItems = $state<Record<string, boolean>>({});
   let expandedFileChangeEntries = $state<Record<string, boolean>>({});
   let loadingItemDetails = $state<Record<string, boolean>>({});
@@ -1582,6 +1650,11 @@
       return null;
     }
 
+    if (workbenchEnabled && !projects.some(p=>p.path===conversation?.preferences.cwd)) {
+      errorText="请先创建或选择一个项目，再开始新对话。";
+      mobileSidebarOpen=isMobileLayout;
+      return null;
+    }
     const draftState = conversation;
     const draftTextSnapshot = draft;
     const draftAttachmentSnapshot = [...draftAttachments];
@@ -3900,6 +3973,7 @@
 
   function normalizeSessionFilterState(filter: Partial<SessionSummaryFilter> | null | undefined): SessionSummaryFilter {
     return {
+      cwd: workbenchEnabled ? selectedProject || projectRoot : filter?.cwd,
       pinnedOnly: Boolean(filter?.pinnedOnly),
       runningOnly: Boolean(filter?.runningOnly),
       queuedOnly: Boolean(filter?.queuedOnly),
@@ -4043,6 +4117,7 @@
   }
 
   function matchesSessionSummaryFilter(session: SessionSummary, filter: SessionSummaryFilter) {
+    if (filter.cwd && session.cwd !== filter.cwd) return false;
     if (filter.pinnedOnly && !session.pinned) {
       return false;
     }
@@ -4559,10 +4634,10 @@
   function measureTranscriptTurn(node: HTMLElement, initialTurnId: string) {
     let turnId = initialTurnId;
     const recordHeight = (entry?: ResizeObserverEntry) => {
-      const borderBoxSize = entry?.borderBoxSize;
+      const borderBoxSize = entry?.borderBoxSize as readonly ResizeObserverSize[] | ResizeObserverSize | undefined;
       const nextHeight = Array.isArray(borderBoxSize)
         ? borderBoxSize[0]?.blockSize
-        : borderBoxSize?.blockSize;
+        : (borderBoxSize as ResizeObserverSize | undefined)?.blockSize;
       queueTranscriptTurnMeasurement(turnId, nextHeight ?? node.getBoundingClientRect().height);
     };
     const observer =
@@ -4982,6 +5057,7 @@
       query: sessionSearchQuery.trim(),
       scope: sessionSearchScope,
       filter: {
+        cwd: sessionFilter.cwd,
         pinnedOnly: sessionFilter.pinnedOnly,
         runningOnly: sessionFilter.runningOnly,
         queuedOnly: sessionFilter.queuedOnly,
@@ -6073,6 +6149,7 @@
     }
 
     releaseGlobalStream = api.subscribeGlobal((event) => {
+      if (event.kind === "notification" && event.method === "codex-webui/projectsUpdated") void refreshProjects();
       handleGlobalEvent(event);
     });
   }
@@ -6112,6 +6189,8 @@
       readSessionListStateFromUrl();
       const requestedSessionId = getRequestedSessionIdFromUrl();
       const draftSessionRequested = getDraftSessionRequestedFromUrl();
+      await refreshProjects();
+      sessionFilter = {...sessionFilter, ...(workbenchEnabled ? {cwd:selectedProject || projectRoot} : {})};
       const [nextConfig] = await Promise.all([api.getConfig(), refreshSessions()]);
       config = applyLocalComposerPreferencesToConfig(nextConfig);
       syncConfiguredTheme(config);
@@ -6132,7 +6211,7 @@
       }
 
       if (draftSessionRequested) {
-        activateDraftSession(config.defaults);
+        activateDraftSession({...config.defaults, ...(workbenchEnabled ? {cwd:selectedProject} : {})});
         return;
       }
 
@@ -6142,7 +6221,7 @@
         return;
       }
 
-      activateDraftSession(config.defaults);
+      activateDraftSession({...config.defaults, ...(workbenchEnabled ? {cwd:selectedProject} : {})});
     } catch (error) {
       errorText = describeError(error);
     }
@@ -6904,6 +6983,8 @@
               "item/reasoning/summaryTextDelta",
               "item/reasoning/summaryPartAdded",
               "item/commandExecution/outputDelta",
+              "item/fileChange/outputDelta",
+              "item/mcpToolCall/progress",
               "item/commandExecution/requestApproval",
               "item/fileChange/requestApproval",
               "item/permissions/requestApproval",
@@ -6945,6 +7026,8 @@
               "item/reasoning/summaryTextDelta",
               "item/reasoning/summaryPartAdded",
               "item/commandExecution/outputDelta",
+              "item/fileChange/outputDelta",
+              "item/mcpToolCall/progress",
               "item/commandExecution/requestApproval",
               "item/fileChange/requestApproval",
               "item/permissions/requestApproval",
@@ -6980,7 +7063,7 @@
               };
               void loadItemDetail(turnId, itemId, true);
             }
-            if (payload.method === "item/completed" && itemType === "commandExecution") {
+            if (!workbenchEnabled && payload.method === "item/completed" && itemType === "commandExecution") {
               expandedItems = {
                 ...expandedItems,
                 [getItemKey(turnId, itemId)]: false
@@ -8276,7 +8359,7 @@
     mobileSidebarOpen = false;
     draftSelectedSkills = [];
     composerSkillQuery = "";
-    activateDraftSession(config.defaults);
+    activateDraftSession({...config.defaults, ...(workbenchEnabled ? {cwd:selectedProject} : {})});
   }
 
   function isHundredMContextEnabled(preferences: SessionPreferences | null | undefined) {
@@ -13374,7 +13457,7 @@
       return m.mcp_call();
     }
     if (item.type === "dynamicToolCall") {
-      return m.tool_call();
+      return `${m.tool_call()} · ${String(item.tool ?? "tool")}`;
     }
     if (item.type === "webSearch") {
       return m.web_search();
@@ -13932,7 +14015,7 @@
 
   function getDeferredToolBody(item: CodexItem) {
     if (item.type === "commandExecution") {
-      return String(item.aggregatedOutput ?? "");
+      return [Array.isArray(item.command)?item.command.join(" "):String(item.command??""), String(item.aggregatedOutput ?? "")].filter(Boolean).join("\n\n");
     }
     if (item.type === "fileChange") {
       return getFileChangeViews(item)
@@ -13957,6 +14040,12 @@
       if (textItems.length > 0) {
         return textItems.join("\n\n");
       }
+    }
+    if (item.type === "dynamicToolCall" || item.type === "mcpToolCall") {
+      const input = item.input ?? item.arguments ?? (item.invocation as Record<string,unknown>|undefined)?.arguments;
+      const result = item.result ?? item.output ?? item.error;
+      const text = (value:unknown) => typeof value === "string" ? value : JSON.stringify(value,null,2);
+      return [input != null ? `输入\n${text(input)}` : "", result != null ? `输出\n${text(result)}` : ""].filter(Boolean).join("\n\n");
     }
     return JSON.stringify(item, null, 2);
   }
@@ -14099,7 +14188,7 @@
 
   function shouldCollapseTurnLogs(turn: ConversationState["thread"]["turns"][number]) {
     const model = getTurnRenderModel(turn);
-    return !isTurnRunning(turn.id) && Boolean(model.finalAgentItem) && getCollapsedTurnProgressCount(turn) > 0;
+    return !processExpanded && !isTurnRunning(turn.id) && Boolean(model.finalAgentItem) && getCollapsedTurnProgressCount(turn) > 0;
   }
 
   function isTurnLogExpanded(turnId: string) {
@@ -14488,7 +14577,7 @@
     {/if}
   </div>
 {:else}
-<div class="flex h-[100dvh] min-h-[100dvh] w-full bg-white overflow-hidden font-sans text-gray-900" data-testid="workspace-shell">
+<div class="flex h-[100dvh] min-h-[100dvh] w-full bg-white overflow-hidden font-sans text-gray-900" data-testid="workspace-shell" class:workbench-mode={workbenchEnabled}>
   {#if showConnectionSnackbar || feedbackSnackbar}
     <div class="workspace-snackbar-stack pointer-events-none fixed inset-x-0 z-[110] flex justify-center px-3 sm:px-6">
       <div class="flex w-full max-w-xl flex-col gap-2">
@@ -14562,6 +14651,18 @@
         : "w-[22rem] min-w-[22rem] max-w-[24rem] flex-shrink-0"
     ]}
   >
+    {#if workbenchEnabled}
+    <ProjectSidebar {projects} root={projectRoot} {selectedProject} {sessions} selectedId={selectedSessionId} {connectionState}
+      mobile={isMobileLayout} readOnly={readOnlyRole} dark={resolvedTheme === "dark"}
+      onSelectProject={selectProject} onCreateProject={createProject} onCreateSession={()=>void createSession()}
+      onSelectSession={(id)=>void selectSession(id)} onClose={closeMobileSidebar}
+      onOpenFile={(path)=>{void openFileTab(path);mobileSidebarOpen=false;}} onReference={referenceProjectFile}
+      onUpload={()=>{mobileSidebarOpen=false;promptAttachmentPicker();}} onSettings={openSettingsTab}
+      onLogout={()=>void logoutWebUi()} onTheme={()=>changeThemeMode(resolvedTheme==="dark"?"light":"dark")}
+      onLoadMore={()=>void loadMoreSessions()} hasMore={sessionsHasMore}
+      archived={showArchivedSessions} onArchivedChange={updateArchivedSessions}
+    />
+    {:else}
     <SessionSidebar
       account={config?.account ?? null}
       {accountLoginFlow}
@@ -14719,6 +14820,7 @@
       }}
       selectedId={selectedSessionId}
     />
+    {/if}
   </aside>
 
   <!-- Main Content -->
@@ -14766,6 +14868,9 @@
       onToggleSearch={toggleSessionTurnSearch}
     />
 
+    {#if workbenchEnabled}
+      <div class="wb-project-bar"><strong>{projects.find(p=>p.path===selectedProject)?.name ?? "尚未选择项目"}</strong><code title={conversation?.preferences.cwd ?? selectedProject}>{conversation?.preferences.cwd ?? selectedProject}</code><button class="wb-secondary" disabled={!selectedProject && !isMobileLayout} onclick={()=>{if(isMobileLayout)mobileSidebarOpen=true;else void createSession();}}>{isMobileLayout?"项目与文件":"新对话"}</button></div>
+    {/if}
     <!-- Workspace Tabs -->
     {#if workspaceTabs.length > 1}
       <WorkspaceTabStrip
@@ -14848,6 +14953,10 @@
                   </div>
                 </div>
               {:else if conversation}
+                {#if workbenchEnabled && !selectedSessionId}
+                  <div class="wb-welcome"><small>你的远程工作空间</small><h2>{selectedProject ? "在这个项目里开始工作" : "先为任务创建一个项目"}</h2><p>{selectedProject ? "告诉 Codex 想完成什么。命令会在上方的项目目录中运行，生成的文件也留在 DGX。" : "打开项目导航，创建或选择真实文件夹。一个项目可以有多条对话。"}</p>{#if isMobileLayout&&!selectedProject}<button class="wb-primary" onclick={()=>mobileSidebarOpen=true}>打开项目导航</button>{/if}</div>
+                {/if}
+                {#if workbenchEnabled && selectedSessionId}<div class="wb-process-controls"><button class="wb-secondary" onclick={()=>void showProcessDetails()}>{processExpanded?"收起已完成过程":"展开工作过程"}</button><span>显示模型与工具实际返回的信息</span></div>{/if}
                 {#if conversation.goal}
                   <div class="goal-chip sticky top-3 z-[44] mb-6 flex min-w-0 items-center justify-between gap-2 rounded-2xl border border-amber-200/80 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
                     <div class="min-w-0 flex items-center gap-2">
@@ -14927,7 +15036,7 @@
                   </div>
                 {/if}
 
-                {#if !readOnlyRole}
+                {#if !readOnlyRole && (!workbenchEnabled || Boolean(conversation?.thread.turns.length))}
                   <div
                     class="rounded-2xl border px-3 py-2 shadow-sm"
                     style="border-color: var(--line); background: var(--panel-strong); color: var(--ink-strong);"
@@ -15597,7 +15706,7 @@
               {/if}
 
               <div class="relative group">
-                {#if lastComposerHistoryPrompt}
+                {#if lastComposerHistoryPrompt && !workbenchEnabled}
                   <div class="mb-1.5 flex items-center gap-1.5 px-0.5">
                     <button
                       class="ui-animated-button ui-animated-button--soft flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-gray-200/80 bg-white/80 px-2.5 py-1.25 text-left text-[10px] text-gray-500 shadow-sm backdrop-blur-sm transition-colors hover:border-amber-200 hover:bg-amber-50/70 hover:text-gray-700"
@@ -15689,7 +15798,7 @@
                   
                   {#if draftAttachments.length > 0}
                     <div class="flex flex-wrap gap-1.5 px-3.5 pb-1.5">
-                      {#each draftAttachments as attachment (attachment.id)}<button class="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-[10px] font-bold text-gray-600 transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 group disabled:cursor-not-allowed disabled:opacity-60" disabled={readOnlyRole} onclick={() => void removeDraftAttachment(attachment.id)} type="button"><FileText size={11} /><span>{attachment.originalName}</span><X size={11} class="opacity-0 transition-opacity group-hover:opacity-100" /></button>{/each}
+                      {#each draftAttachments as attachment (attachment.id)}<button class="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-[10px] font-bold text-gray-600 transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 group disabled:cursor-not-allowed disabled:opacity-60" disabled={readOnlyRole} onclick={() => void removeDraftAttachment(attachment.id)} type="button"><FileText size={11} /><span title={attachment.projectPath ?? attachment.originalName}>{attachment.originalName}</span><X size={11} class="opacity-0 transition-opacity group-hover:opacity-100" /></button>{/each}
                     </div>
                   {/if}
 
@@ -17848,7 +17957,7 @@
           <Zap size={16} />
         </div>
         <div class="min-w-0">
-          <h4 class="text-[10px] font-bold uppercase tracking-widest leading-none text-amber-700">{m.reasoning()}</h4>
+          <h4 class="text-[10px] font-bold uppercase tracking-widest leading-none text-amber-700">{workbenchEnabled ? "推理摘要" : m.reasoning()}</h4>
           {#if Array.isArray(item.summary) && item.summary.length > 0}
             <p class="mt-1 text-xs leading-relaxed text-amber-700/80 break-words">
               {m.steps_count({ count: String(item.summary.length) })}
@@ -17857,6 +17966,7 @@
         </div>
       </div>
       <div class="space-y-3 bg-white/85 px-4 py-3">
+        {#if !String(item.text ?? "").trim() && !(Array.isArray(item.summary) && item.summary.some(entry=>String(entry).trim()))}<p class="wb-reason-empty">模型未提供可显示的推理摘要。</p>{/if}
         {#if String(item.text ?? "").trim()}
           <div class="rounded-xl border border-amber-100 bg-white px-3 py-3">
             <MarkdownMessage compact expandLabel={ui.showFullMessage} maxInitialChars={compactMarkdownInitialChars} on:openLocalPath={(event: CustomEvent<{ href: string }>) => openFileFromMessage(event.detail.href)} text={String(item.text ?? "")} />
@@ -17928,12 +18038,15 @@
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-2">
-          {#if item.type === "commandExecution" && item.exitCode !== null}
+          {#if item.type === "commandExecution" && item.exitCode != null}
             <span class="px-1.5 py-0.5 bg-gray-100 text-[9px] font-bold text-gray-500 rounded uppercase tracking-tighter">{m.exit_label()} {item.exitCode}</span>
           {/if}
           <ChevronDown size={14} class="text-gray-400 {isItemExpanded(turnId, item.id) ? 'rotate-180' : ''} transition-transform" />
         </div>
       </button>
+      {#if Array.isArray(item.progressMessages) && item.progressMessages.length}<pre class="wb-work-preview">{item.progressMessages.join("\n")}</pre>{/if}
+      {#if item.type === "fileChange" && item.aggregatedOutput}<pre class="wb-work-preview">{String(item.aggregatedOutput)}</pre>{/if}
+      {#if workbenchEnabled && item.type === "commandExecution" && !isItemExpanded(turnId,item.id)}<pre class="wb-work-preview">{Array.isArray(item.command)?item.command.join(" "):String(item.command??"")}{item.aggregatedOutput ? `\n${String(item.aggregatedOutput).slice(-1500)}` : ""}</pre>{/if}
       {#if isItemExpanded(turnId, item.id)}
         <div class="turn-card-expand p-0 border-t border-gray-100" transition:slide|local={{ duration: 220 }}>
           {#if isItemDetailLoading(turnId, item.id)}
@@ -17981,7 +18094,7 @@
       <button class="turn-card-header turn-card-header--neutral flex w-full items-center justify-between gap-2.5 px-3 py-2.25 hover:bg-gray-50 transition-colors" data-sticky-level={stickyLevel} onclick={() => void toggleReadOnlyCommandGroup(turnId, entry.key, entry.items)}><div class="flex min-w-0 flex-1 items-center gap-2.5"><div class="shrink-0 rounded-lg bg-gray-100 p-1.5 text-gray-400">{#if getReadOnlyCommandGroupKind(entry.items) === "git"}<GitBranch size={14} />{:else}<Search size={14} />{/if}</div><div class="min-w-0 flex-1 text-left"><h4 class="truncate text-[11px] font-bold leading-tight text-gray-900">{getReadOnlyCommandGroupLabel(entry.items)}</h4><p class="mt-0.5 truncate text-[10px] font-medium text-gray-500">{summarizeReadOnlyCommandGroup(entry.items)}</p></div></div><div class="flex shrink-0 items-center gap-2"><span class="px-1.5 py-0.5 bg-gray-50 text-[9px] font-bold text-gray-400 rounded uppercase tracking-tighter">{ui.opsCount(entry.items.length)}</span><ChevronDown size={14} class="text-gray-400 {isItemExpanded(turnId, entry.key) ? 'rotate-180' : ''} transition-transform" /></div></button>
       {#if isItemExpanded(turnId, entry.key)}
         <div class="turn-card-expand border-t border-gray-100 bg-gray-50/30" transition:slide|local={{ duration: 220 }}>{#if isItemDetailLoading(turnId, entry.key)}<div class="flex justify-center p-5 text-xs italic text-gray-400 animate-pulse">{ui.readingFileData}</div>
-          {:else}<div class="p-0">{#each entry.items as commandItem}<div class="border-b border-gray-100 p-3 last:border-0"><div class="mb-1.5 flex items-center justify-between"><span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">{summarizeCommand(commandItem)}</span>{#if commandItem.exitCode !== null}<span class="text-[9px] font-mono text-gray-400">{m.exit_label()} {commandItem.exitCode}</span>{/if}</div>{@render renderCappedOutput(String(commandItem.aggregatedOutput ?? ""), getOutputPreviewKey(turnId, `${entry.key}:${commandItem.id}`), true)}</div>{/each}</div>{/if}</div>
+          {:else}<div class="p-0">{#each entry.items as commandItem}<div class="border-b border-gray-100 p-3 last:border-0"><div class="mb-1.5 flex items-center justify-between"><span class="text-[10px] font-bold uppercase tracking-widest text-gray-500">{summarizeCommand(commandItem)}</span>{#if commandItem.exitCode != null}<span class="text-[9px] font-mono text-gray-400">{m.exit_label()} {commandItem.exitCode}</span>{/if}</div>{@render renderCappedOutput(String(commandItem.aggregatedOutput ?? ""), getOutputPreviewKey(turnId, `${entry.key}:${commandItem.id}`), true)}</div>{/each}</div>{/if}</div>
       {/if}
     </div>
   {:else}

@@ -181,6 +181,9 @@ async function downloadRequest(input: string) {
 const ws = new WebSocketRpcClient();
 
 export const api = {
+  listProjects() { return ws.request<{ enabled: boolean; root?: string; projects: Array<{name: string; path: string}> }>("projects/list"); },
+  createProject(name: string) { return ws.request<{name: string; path: string}>("projects/create", {name}); },
+  listProjectFiles(project: string, path?: string) { return ws.request<{path: string; parent: string | null; entries: Array<{name: string; path: string; isDirectory: boolean; size: number}>; truncated: boolean}>("projects/files", {project, path}); },
   getAuthSession() {
     return request<AuthSessionPayload>(apiPath("/auth/session"), {
       method: "GET"

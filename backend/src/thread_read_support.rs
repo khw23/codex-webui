@@ -83,7 +83,8 @@ pub(crate) fn thread_source_marks_subagent(source: &Value) -> bool {
     let source_text = source_text.to_ascii_lowercase();
     // Codex keeps non-interactive worker sessions out of the default thread list.
     // The web UI maps those to the existing hidden-subagent path for compatibility.
-    source_text == "exec"
+    (source_text == "exec"
+        && std::env::var("CODEX_WEBUI_INCLUDE_EXEC_SESSIONS").as_deref() != Ok("true"))
         || source_text == "subagent"
         || source_text.starts_with("subagent_")
         || source_text.starts_with("internal_")
@@ -116,19 +117,23 @@ pub(crate) fn thread_is_subagent(thread: &Value) -> bool {
 
 fn normalize_session_item_type_name(item_type: &str) -> &str {
     match item_type {
-        "agent_message" | "assistant_message" | "assistantMessage" => "agentMessage",
-        "user_message" => "userMessage",
-        "command_execution" => "commandExecution",
-        "file_change" => "fileChange",
-        "mcp_tool_call" => "mcpToolCall",
-        "dynamic_tool_call" => "dynamicToolCall",
-        "web_search" => "webSearch",
-        "image_view" => "imageView",
-        "context_compaction" => "contextCompaction",
-        "image_generation" => "imageGeneration",
-        "collab_agent_tool_call" => "collabAgentToolCall",
+        "AgentMessage" | "agent_message" | "assistant_message" | "assistantMessage" => {
+            "agentMessage"
+        }
+        "UserMessage" | "user_message" => "userMessage",
+        "CommandExecution" | "command_execution" => "commandExecution",
+        "FileChange" | "file_change" => "fileChange",
+        "McpToolCall" | "mcp_tool_call" => "mcpToolCall",
+        "DynamicToolCall" | "dynamic_tool_call" => "dynamicToolCall",
+        "WebSearch" | "web_search" => "webSearch",
+        "ImageView" | "image_view" => "imageView",
+        "ContextCompaction" | "context_compaction" => "contextCompaction",
+        "ImageGeneration" | "image_generation" => "imageGeneration",
+        "CollabAgentToolCall" | "collab_agent_tool_call" => "collabAgentToolCall",
         "entered_review_mode" => "enteredReviewMode",
         "exited_review_mode" => "exitedReviewMode",
+        "Reasoning" => "reasoning",
+        "Plan" => "plan",
         _ => item_type,
     }
 }
@@ -256,11 +261,60 @@ pub(crate) fn normalize_session_item_payload(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(normalize_session_item_type_name)
-        .unwrap_or("unknown");
+        .unwrap_or("unknown")
+        .to_string();
     normalized.insert(
         "type".to_string(),
         Value::String(normalized_type.to_string()),
     );
+    for (source, target) in [
+        ("aggregated_output", "aggregatedOutput"),
+        ("exit_code", "exitCode"),
+        ("process_id", "processId"),
+        ("content_items", "contentItems"),
+    ] {
+        if !normalized.contains_key(target) {
+            if let Some(value) = normalized.get(source).cloned() {
+                normalized.insert(target.to_string(), value);
+            }
+        }
+    }
+    if matches!(normalized_type.as_str(), "agentMessage" | "userMessage")
+        && !normalized.contains_key("text")
+    {
+        if let Some(entries) = normalized.get("content").and_then(Value::as_array) {
+            let text = entries
+                .iter()
+                .filter_map(|v| v.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n");
+            normalized.insert("text".to_string(), json!(text));
+        }
+    }
+    if normalized_type == "reasoning" {
+        for key in ["summary", "content"] {
+            if let Some(entries) = normalized.get(key).and_then(Value::as_array) {
+                let texts = entries
+                    .iter()
+                    .filter_map(|entry| {
+                        entry
+                            .as_str()
+                            .or_else(|| entry.get("text").and_then(Value::as_str))
+                    })
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if key == "summary" {
+                    normalized.insert("summary".to_string(), json!(texts));
+                } else if normalized
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .is_none_or(|text| text.is_empty())
+                {
+                    normalized.insert("text".to_string(), json!(texts.join("\n")));
+                }
+            }
+        }
+    }
     Value::Object(normalized)
 }
 

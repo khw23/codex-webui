@@ -1,3 +1,5 @@
+> **Personal project workbench fork**: see [WORKBENCH.md](WORKBENCH.md) for project folders, file handling, reconnect behavior, and isolated deployment. Upstream documentation follows.
+
 # codex-webui
 
 `codex-webui` is a reconnect-safe web workspace for Codex CLI.

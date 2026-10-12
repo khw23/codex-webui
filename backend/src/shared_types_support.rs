@@ -406,6 +406,8 @@ pub(crate) struct StoredAttachmentRecord {
     pub(crate) id: String,
     #[serde(alias = "originalName")]
     pub(crate) original_name: String,
+    #[serde(default, alias = "projectPath")]
+    pub(crate) project_path: Option<String>,
     pub(crate) path: Option<String>,
     #[serde(alias = "mimeType")]
     pub(crate) mime_type: Option<String>,

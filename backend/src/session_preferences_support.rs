@@ -53,10 +53,15 @@ pub(crate) async fn normalize_session_preferences_payload(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    next_preferences.insert(
-        "cwd".to_string(),
-        Value::String(resolve_allowed_directory(state, &cwd).await?),
-    );
+    let cwd = if projects_root(&state.config).is_some() {
+        validate_project_directory(state, &cwd)
+            .await?
+            .display()
+            .to_string()
+    } else {
+        resolve_allowed_directory(state, &cwd).await?
+    };
+    next_preferences.insert("cwd".to_string(), Value::String(cwd));
     let normalized_git_repo_path = normalize_git_repo_path(
         state,
         next_preferences.get("gitRepoPath").unwrap_or(&Value::Null),

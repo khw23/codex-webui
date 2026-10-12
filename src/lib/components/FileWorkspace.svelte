@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { Download, Edit3, FileDiff, FileText, GitBranch, RefreshCw, Save, X } from "lucide-svelte";
 
   import { api } from "$lib/api";
@@ -34,6 +35,8 @@
   let noticeText = $state("");
   let editMode = $state(false);
   let viewMode = $state<ViewMode>("source");
+  let imageUrl = $state("");
+  onDestroy(()=>{if(imageUrl)URL.revokeObjectURL(imageUrl);});
   let loadedPath = "";
   let loadVersion = 0;
 
@@ -61,6 +64,13 @@
     errorText = "";
     noticeText = "";
     try {
+      if(imageUrl){URL.revokeObjectURL(imageUrl);imageUrl="";}
+      if (/\.(png|jpe?g|gif|webp|avif)$/i.test(path)) {
+        payload=null;
+        const result=await api.downloadEditableFile(path);
+        if(version===loadVersion) imageUrl=URL.createObjectURL(new Blob([result.blob],{type:/\.png$/i.test(path)?"image/png":/\.gif$/i.test(path)?"image/gif":/\.webp$/i.test(path)?"image/webp":/\.avif$/i.test(path)?"image/avif":"image/jpeg"}));
+        return;
+      }
       const nextPayload = await api.getEditableFile(path);
       if (version !== loadVersion) {
         return;
@@ -68,7 +78,7 @@
       payload = nextPayload;
       editorValue = nextPayload.content;
       editMode = false;
-      viewMode = "source";
+      viewMode = isMarkdownPath(path) ? "preview" : "source";
     } catch (error) {
       if (version !== loadVersion) {
         return;
@@ -162,13 +172,13 @@
             <span>{m.file_viewer_download()}</span>
           {/if}
         </button>
-        {#if onOpenDiff}
+        {#if onOpenDiff && payload}
           <button class="file-workspace__button" onclick={() => void onOpenDiff(activePath)} type="button">
             <FileDiff size={14} />
             <span>{m.diff()}</span>
           </button>
         {/if}
-        {#if onOpenGit}
+        {#if onOpenGit && payload}
           <button class="file-workspace__button" onclick={() => void onOpenGit(activePath)} type="button">
             <GitBranch size={14} />
             <span>{m.file_viewer_open_git()}</span>
@@ -179,6 +189,7 @@
             {m.file_viewer_preview()}
           </button>
         {/if}
+        {#if payload}
         <button class="file-workspace__button" data-active={viewMode === "source" || editMode} onclick={() => { editMode = false; viewMode = "source"; }} type="button">
           <FileText size={14} />
           <span>{m.file_viewer_source()}</span>
@@ -196,6 +207,7 @@
             <span>{m.save()}</span>
           {/if}
         </button>
+        {/if}
         <button class="file-workspace__icon-button" onclick={() => void onClose()} type="button" title={m.close()}>
           <X size={18} />
         </button>
@@ -220,6 +232,10 @@
           <span class="file-workspace__spin"><RefreshCw size={18} /></span>
           <span>{m.loading_file()}</span>
         </div>
+      {:else if imageUrl}
+        <div class="file-workspace__image"><img src={imageUrl} alt={displayName}/></div>
+      {:else if errorText}
+        <div class="file-workspace__empty">此文件暂不支持预览，可以使用上方“下载”保存。</div>
       {:else if payload && markdown && viewMode === "preview" && !editMode}
         <div class="file-workspace__markdown">
           <MarkdownMessage
@@ -241,6 +257,7 @@
 </div>
 
 <style>
+  .file-workspace__image{padding:20px;display:flex;justify-content:center}.file-workspace__image img{max-width:100%;max-height:75vh;object-fit:contain}
   .file-workspace {
     height: 100%;
     overflow-y: auto;

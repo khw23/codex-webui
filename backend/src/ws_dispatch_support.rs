@@ -1060,6 +1060,21 @@ pub(crate) async fn execute_ws_method(
             .await
             .map_err(anyhow::Error::from)
         }
+        "projects/list" => list_projects_payload(state)
+            .await
+            .map_err(anyhow::Error::from),
+        "projects/create" => {
+            create_project_payload(state, &auth.profile_id, &require_string(&params, "name")?)
+                .await
+                .map_err(anyhow::Error::from)
+        }
+        "projects/files" => list_project_files_payload(
+            state,
+            &require_string(&params, "project")?,
+            params.get("path").and_then(Value::as_str),
+        )
+        .await
+        .map_err(anyhow::Error::from),
         "directories/browse" => {
             let current_path = params.get("currentPath").and_then(Value::as_str);
             list_directories_payload(state, current_path)

@@ -13,3 +13,16 @@ dist
 rhwp-*.png
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Personal deployment state is never source code.
+/runtime/
+/backups/
+/releases/
+/current
+/evidence/
+/output/
+/.tools/
+/.cache/
+/credentials.json
+/login.txt
+/codex-home/

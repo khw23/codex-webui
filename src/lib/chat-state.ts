@@ -306,7 +306,9 @@ function mergeItem(existingItem: CodexItem | undefined, incomingItem: CodexItem)
     merged.changes = preferRicherArray(existingItem.changes, incomingItem.changes);
   }
   if ("command" in existingItem || "command" in incomingItem) {
-    merged.command = preferRicherArray(existingItem.command, incomingItem.command);
+    merged.command = typeof incomingItem.command === "string" || typeof existingItem.command === "string"
+      ? preferProgressiveString(existingItem.command, incomingItem.command)
+      : preferRicherArray(existingItem.command, incomingItem.command);
   }
   if ("diff" in existingItem || "diff" in incomingItem) {
     merged.diff = preferProgressiveString(existingItem.diff, incomingItem.diff);
@@ -1044,6 +1046,11 @@ export function applyStreamEvent(current: ConversationState, event: StreamEvent)
     });
     const streamItem = (params.item as CodexItem) ?? ({ id: String(params.itemId ?? ""), type: "unknown" } satisfies CodexItem);
     const itemType = normalizeItemTypeName(streamItem.type);
+    if (itemType === "reasoning") {
+      const textOf = (value: unknown) => typeof value === "string" ? value : value && typeof value === "object" && "text" in value ? String((value as {text:unknown}).text ?? "") : "";
+      if (Array.isArray(streamItem.summary)) streamItem.summary = streamItem.summary.map(textOf);
+      if (!streamItem.text && Array.isArray(streamItem.content)) streamItem.text = streamItem.content.map(textOf).filter(Boolean).join("\n");
+    }
     const lifecycleStatus =
       itemType === "contextCompaction" ? (method === "item/started" ? "inProgress" : "completed") : streamItem.lifecycleStatus;
     upsertItem(seeded.turn, {
@@ -1141,7 +1148,18 @@ export function applyStreamEvent(current: ConversationState, event: StreamEvent)
     return next;
   }
 
-  if (method === "item/commandExecution/outputDelta") {
+  if (method === "item/mcpToolCall/progress") {
+    const turnId = String(params.turnId ?? ""), itemId = String(params.itemId ?? "");
+    if (!turnId || !itemId || typeof params.message !== "string") return next;
+    const seeded = ensureTurn(next, turnId, {status:isLiveThreadStatus(next.thread.status)?"inProgress":"completed"});
+    const existing = seeded.turn.items.find(item=>item.id===itemId) ?? {id:itemId,type:"mcpToolCall"};
+    const messages = Array.isArray(existing.progressMessages) ? existing.progressMessages : [];
+    upsertItem(seeded.turn, {...existing, progressMessages:[...messages,params.message].slice(-100)});
+    next.thread.turns=seeded.turns;
+    return next;
+  }
+
+  if (method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta") {
     const turnId = String(params.turnId ?? "");
     const itemId = String(params.itemId ?? "");
     if (!turnId) {
@@ -1157,7 +1175,7 @@ export function applyStreamEvent(current: ConversationState, event: StreamEvent)
       seeded.turn.items.find((candidate) => candidate.id === itemId) ??
       ({
         id: itemId,
-        type: "commandExecution",
+        type: method === "item/fileChange/outputDelta" ? "fileChange" : "commandExecution",
         command: "",
         cwd: next.preferences.cwd,
         aggregatedOutput: ""

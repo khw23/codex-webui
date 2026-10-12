@@ -85,6 +85,7 @@ pub(crate) fn display_thread_name(name: Option<&str>, preview: Option<&str>) -> 
 
 #[derive(Clone, Default)]
 pub(crate) struct SessionFilterCriteria {
+    pub(crate) cwd: Option<String>,
     pub(crate) pinned_only: bool,
     pub(crate) running_only: bool,
     pub(crate) queued_only: bool,
@@ -161,6 +162,11 @@ pub(crate) fn session_filter_from_value(filter: Option<&Value>) -> SessionFilter
     profile_ids.dedup();
 
     SessionFilterCriteria {
+        cwd: filter
+            .and_then(|v| v.get("cwd"))
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string),
         pinned_only: filter
             .and_then(|value| value.get("pinnedOnly"))
             .and_then(Value::as_bool)
@@ -205,6 +211,7 @@ pub(crate) fn session_filter_from_query(query: Option<&str>) -> SessionFilterCri
     profile_ids.dedup();
 
     SessionFilterCriteria {
+        cwd: query_param_value(query, "filterCwd").filter(|v| !v.is_empty()),
         pinned_only: query_param_value(query, "filterPinned").as_deref() == Some("true"),
         running_only: query_param_value(query, "filterRunning").as_deref() == Some("true"),
         queued_only: query_param_value(query, "filterQueued").as_deref() == Some("true"),
@@ -327,6 +334,13 @@ pub(crate) fn session_summary_matches_filter(
     summary: &Value,
     filter: &SessionFilterCriteria,
 ) -> bool {
+    if filter
+        .cwd
+        .as_deref()
+        .is_some_and(|cwd| summary.get("cwd").and_then(Value::as_str) != Some(cwd))
+    {
+        return false;
+    }
     if filter.pinned_only
         && !summary
             .get("pinned")
