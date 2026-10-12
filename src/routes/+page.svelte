@@ -376,10 +376,11 @@
   let projects = $state<Array<{name:string;path:string}>>([]);
   let selectedProject = $state("");
   let processExpanded = $state(false);
-  let projectsLoading = false;
+  let projectsLoading: Promise<void> | null = null;
   async function refreshProjects() {
-    if (projectsLoading || authenticated !== true) return;
-    projectsLoading = true;
+    if (authenticated !== true) return;
+    if (projectsLoading) return projectsLoading;
+    projectsLoading = (async () => {
     try {
       const payload = await api.listProjects();
       workbenchEnabled = payload.enabled;
@@ -392,7 +393,9 @@
         conversation = {...conversation, preferences:{...conversation.preferences,cwd:selectedProject}};
       }
     } catch (error) { errorText = describeError(error); }
-    finally {projectsLoading=false;}
+    finally {projectsLoading=null;}
+    })();
+    return projectsLoading;
   }
   function selectProject(path:string) {
     selectedProject=path;

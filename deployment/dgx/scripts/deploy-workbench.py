@@ -44,6 +44,6 @@ def main():
         if prior:current.symlink_to(prior)
         run('systemctl','--user','daemon-reload');run('systemctl','--user','start','codex-webui')
         raise
-    evidence={'release':str(release),'source_commit':commit,'backup':str(backup),'predeployment_idle_sessions':count,'projects_root':'/home/khw/projects/web-ui-projects','service':'codex-webui.service','time':timestamp}
+    evidence={'release':str(release),'source_commit':commit,'backup':str(backup),'predeployment_idle_sessions':count,'previous_release':prior,'projects_root':'/home/khw/projects/web-ui-projects','service':'codex-webui.service','time':timestamp}
     (root/'evidence/workbench-deployment.json').write_text(json.dumps(evidence,indent=2)+'\n');print(json.dumps(evidence))
 if __name__=='__main__':main()

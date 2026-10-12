@@ -5,8 +5,11 @@ from pathlib import Path
 root=Path('/home/khw/projects/web-ui')
 spec=importlib.util.spec_from_file_location('deployment',root/'scripts/deploy-workbench.py');deployment=importlib.util.module_from_spec(spec);spec.loader.exec_module(deployment)
 deployment.auth_get_sessions()
-backup=Path(json.loads((root/'evidence/workbench-deployment.json').read_text())['backup'])
+record=json.loads((root/'evidence/workbench-deployment.json').read_text())
+backup=Path(record['backup'])
 subprocess.run(['systemctl','--user','stop','codex-webui'],check=True)
+if record.get('previous_release'):
+    nextlink=root/'.rollback-next';nextlink.symlink_to(record['previous_release']);nextlink.replace(root/'current')
 shutil.copy2(backup/'webui.env',root/'runtime/webui.env')
 shutil.copy2(backup/'codex-webui.service',Path.home()/'.config/systemd/user/codex-webui.service')
 shutil.copy2(backup/'codex-webui.service',root/'config/codex-webui.service')
