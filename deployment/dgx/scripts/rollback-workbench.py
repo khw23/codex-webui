@@ -2,7 +2,7 @@
 """Return to the saved service and configuration after checking the task list."""
 import importlib.util, json, shutil, subprocess
 from pathlib import Path
-root=Path('/home/khw/projects/web-ui')
+root=Path('/srv/codex-workbench')
 spec=importlib.util.spec_from_file_location('deployment',root/'scripts/deploy-workbench.py');deployment=importlib.util.module_from_spec(spec);spec.loader.exec_module(deployment)
 deployment.auth_get_sessions()
 record=json.loads((root/'evidence/workbench-deployment.json').read_text())

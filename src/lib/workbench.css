@@ -513,10 +513,167 @@
   color:var(--ink,#35434e);
 }
 
-.wb-reason-empty {
-  font-size:12px;
-  color:var(--muted,#75818c);
-  padding:8px 0;
+/* Live turns stay compact. Completed turns retain the existing presentation. */
+.workbench-mode .wb-live-process > :not([hidden]) ~ :not([hidden]) {
+  margin-block-start:8px;
+  margin-block-end:0;
+}
+
+.wb-compact-tool-header {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  width:100%;
+  min-height:34px;
+  padding:6px 9px;
+  border:0;
+  background:var(--panel-strong,#fff);
+  color:var(--muted,#697582);
+  text-align:left;
+  font-size:11px;
+  line-height:20px;
+  cursor:pointer;
+}
+
+.wb-compact-tool-header:hover {
+  background:var(--panel-soft,#f5f7f9);
+}
+
+.wb-compact-tool-header:focus-visible {
+  outline:2px solid var(--accent,#547b85);
+  outline-offset:-2px;
+}
+
+.wb-compact-tool-header > svg,.wb-tool-status {
+  flex-shrink:0;
+}
+
+.wb-tool-label {
+  flex-shrink:0;
+  max-width:40%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--ink,#35434e);
+  font-weight:550;
+}
+
+.wb-tool-summary {
+  min-width:0;
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.wb-tool-status {
+  display:flex;
+  align-items:center;
+  gap:4px;
+  font-size:10px;
+}
+
+.wb-tool-failed {
+  color:#c75550;
+}
+
+.workbench-mode .wb-compact-tool > .turn-card-expand,
+.workbench-mode .wb-compact-tool-detail,
+.workbench-mode .wb-compact-group > .turn-card-expand {
+  max-height:176px;
+  overflow:auto;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+}
+
+.workbench-mode .wb-compact-tool pre,
+.workbench-mode .wb-compact-group pre {
+  font-size:11px;
+  line-height:1.5;
+}
+
+.wb-compact-tool-detail img {
+  max-height:140px;
+}
+
+.wb-image-download {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:11px;
+}
+
+.wb-live-reasoning {
+  padding:2px 0 2px 11px;
+  border-left:2px solid var(--line,#dce1e7);
+  color:var(--muted,#697582);
+}
+
+.wb-reasoning-label {
+  display:block;
+  margin-bottom:3px;
+  font-size:10px;
+  font-weight:550;
+}
+
+.wb-live-reasoning .markdown-body,
+.wb-live-commentary .markdown-body {
+  font-size:13px;
+  line-height:1.65;
+}
+
+.wb-live-reasoning .markdown-body p,
+.wb-live-commentary .markdown-body p {
+  margin-block:4px;
+}
+
+.workbench-mode .wb-compact-group > .turn-card-header {
+  min-height:34px;
+  padding:4px 9px;
+  gap:6px;
+}
+
+.wb-compact-group > .turn-card-header button {
+  padding:2px 0;
+}
+
+.wb-compact-group > .turn-card-header .text-left {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-width:0;
+}
+
+.workbench-mode .wb-compact-group > .turn-card-header h4 {
+  flex-shrink:0;
+  font-size:11px;
+  font-weight:550;
+}
+
+.wb-compact-group > .turn-card-header p {
+  margin:0;
+  min-width:0;
+}
+
+.wb-compact-group > .turn-card-header .shrink-0.rounded-lg {
+  padding:2px;
+  background:transparent;
+}
+
+.workbench-mode .wb-live-process > .turn-card-shell:not(.wb-compact-tool):not(.wb-compact-group) > .turn-card-header {
+  padding:6px 10px;
+  gap:8px;
+}
+
+@media(max-width:767px) {
+  .wb-compact-tool-header {
+    min-height:36px;
+  }
+  .workbench-mode .wb-compact-tool > .turn-card-expand,
+  .workbench-mode .wb-compact-tool-detail,
+  .workbench-mode .wb-compact-group > .turn-card-expand {
+    max-height:160px;
+  }
 }
 
 .wb-process-controls {

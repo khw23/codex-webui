@@ -11,6 +11,8 @@
 5. “展开工作过程”载入最近 8 轮的过程与工具详情；超长输出保持按需加载。模型实际提供的推理摘要才能展示，没有摘要时不会编造。
 6. 关闭浏览器不停止任务。重开同一条对话可恢复状态；在另一个浏览器登录同一个后端，也能看见同一批项目与会话。
 
+运行中命令和工具默认收成一行，点击后在限高区域滚动查看详情；中文进度及实际返回的推理摘要直接显示，不折叠或截断，空摘要不占位。完成后的整体工作过程折叠保持不变。
+
 主机重启、WebUI 服务停止、Codex 进程退出与浏览器断网不同。已写入的会话和文件会保留，但运行中的命令不保证跨进程重启继续。
 
 ## 独立部署
@@ -27,6 +29,8 @@ CODEX_WEBUI_ALLOWED_ROOTS=/srv/codex-workbench/projects
 同时给此部署配置独立的 `CODEX_HOME`、`CODEX_WEBUI_DATA_DIR` 和（如使用多 profile）`CODEX_WEBUI_PROFILES_JSON`。所有 profile 路径也必须指向独立目录，不能沿用个人原生 Codex 的 home。密码哈希、session secret、API 配置只在部署私有目录中维护。
 
 `CODEX_WEBUI_PROJECTS_ROOT` 未设置时保留原上游导航。设置后，cwd 必须是项目根的直接子文件夹，不支持用根目录本身或软链接项目开会话。项目目录与 allowed roots 在启动时校验。目录约束用于会话归属和网页文件访问；Codex 的 shell 权限仍由原部署的 sandbox/approval 配置决定，项目目录不是系统级沙箱。
+
+会话模型和权限选项沿用上游机制：保存会话偏好时，也会更新当前 WebUI profile 的默认配置，可能影响之后新建的会话。这些设置不直接修改另一套原生 Codex 环境。
 
 项目导航使用后端 `projects/list`、`projects/create`、`projects/files`；会话列表复用 `sessions/list` 的 `filter.cwd`，在分页前过滤。数据仍由既有 ui-state 和 Codex rollout 持久化，不引入另一套任务数据库。
 

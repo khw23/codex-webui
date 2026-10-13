@@ -2,7 +2,7 @@
 """Switch this DGX deployment to a validated, fixed workbench build; no API calls to models."""
 import datetime, hashlib, http.cookiejar, json, os, re, shutil, subprocess, tarfile, urllib.request
 from pathlib import Path
-root=Path('/home/khw/projects/web-ui');unit=Path.home()/'.config/systemd/user/codex-webui.service'
+root=Path('/srv/codex-workbench');unit=Path.home()/'.config/systemd/user/codex-webui.service'
 run=lambda *args:subprocess.run(args,check=True,capture_output=True,text=True)
 def auth_get_sessions():
     jar=http.cookiejar.CookieJar();opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
@@ -30,7 +30,7 @@ def main():
             archive.add(root/'runtime',arcname='runtime',filter=lambda entry: None if entry.name.startswith('runtime/workbench-test') else entry)
         envpath=root/'runtime/webui.env';environment=envpath.read_text()
         for key in ['CODEX_WEBUI_ALLOWED_ROOTS','CODEX_WEBUI_PROJECTS_ROOT']:
-            line=f"{key}='/home/khw/projects/web-ui-projects'"
+            line=f"{key}='/srv/codex-workbench-projects'"
             if re.search('^'+key+'=',environment,re.M):environment=re.sub('^'+key+'=.*$',lambda _:line,environment,flags=re.M)
             else:environment+='\n'+line+'\n'
         tmp=envpath.with_suffix('.next');tmp.write_text(environment);tmp.chmod(0o600);tmp.replace(envpath)
@@ -44,6 +44,6 @@ def main():
         if prior:current.symlink_to(prior)
         run('systemctl','--user','daemon-reload');run('systemctl','--user','start','codex-webui')
         raise
-    evidence={'release':str(release),'source_commit':commit,'backup':str(backup),'predeployment_idle_sessions':count,'previous_release':prior,'projects_root':'/home/khw/projects/web-ui-projects','service':'codex-webui.service','time':timestamp}
+    evidence={'release':str(release),'source_commit':commit,'backup':str(backup),'predeployment_idle_sessions':count,'previous_release':prior,'projects_root':'/srv/codex-workbench-projects','service':'codex-webui.service','time':timestamp}
     (root/'evidence/workbench-deployment.json').write_text(json.dumps(evidence,indent=2)+'\n');print(json.dumps(evidence))
 if __name__=='__main__':main()

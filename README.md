@@ -1,3 +1,5 @@
+> **Personal remote workbench:** this fork adds persistent project workspaces and compact live tool output. See [WORKBENCH.md](WORKBENCH.md) for the workflow and deployment notes. The upstream README follows below.
+
 > **Personal project workbench fork**: see [WORKBENCH.md](WORKBENCH.md) for project folders, file handling, reconnect behavior, and isolated deployment. Upstream documentation follows.
 
 # codex-webui

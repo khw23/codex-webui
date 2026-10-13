@@ -7059,7 +7059,7 @@
           const itemId = String(itemRecord?.id ?? payload.params.itemId ?? "");
           const itemType = String(itemRecord?.type ?? "");
           if (turnId && itemId) {
-            if (payload.method === "item/started" && itemType === "commandExecution") {
+            if (!workbenchEnabled && payload.method === "item/started" && itemType === "commandExecution") {
               expandedItems = {
                 ...expandedItems,
                 [getItemKey(turnId, itemId)]: true
@@ -14137,6 +14137,12 @@
   }
 
   function isInternalTranscriptItem(item: CodexItem) {
+    // Empty reasoning events carry no displayable content; keep them in state,
+    // but don't allocate a card or a work-step count for them.
+    if (item.type === "reasoning" && !String(item.text ?? "").trim() &&
+        !(Array.isArray(item.summary) && item.summary.some((entry) => String(entry).trim()))) {
+      return true;
+    }
     return [
       "task_complete",
       "turn_aborted",
@@ -15181,7 +15187,7 @@
 
                     <div class="flex gap-4">
                       <div class="flex-shrink-0 w-8 h-8 rounded-lg bg-amber-600 text-white flex items-center justify-center shadow-sm mt-1"><Bot size={18} /></div>
-                      <div class="flex-1 min-w-0 space-y-6">
+                      <div class="flex-1 min-w-0 space-y-6" class:wb-live-process={workbenchEnabled && isTurnRunning(turn.id)}>
                         {#if shouldCollapseTurnLogs(turn)}
                           {#if collapsedProgressCount > 0}
                             <div class="turn-card-shell border border-gray-100 rounded-xl bg-gray-50/50 overflow-hidden">
@@ -17841,19 +17847,37 @@
   </div>
 {/snippet}
 
+{#snippet renderCompactToolHeader(turnId: string, item: CodexItem)}
+  {@const status = String(item.status ?? "").toLowerCase()}
+  {@const failed = ["failed", "error", "declined"].includes(status) || (item.type === "commandExecution" && item.exitCode != null && item.exitCode !== 0)}
+  {@const done = ["completed", "done", "success"].includes(status) || item.exitCode != null}
+  <button class="wb-compact-tool-header" type="button" aria-expanded={isItemExpanded(turnId, item.id)} onclick={() => void toggleToolItem(turnId, item.id)}>
+    <ChevronDown size={13} class={isItemExpanded(turnId, item.id) ? "" : "-rotate-90"} />
+    <span class="wb-tool-label">{item.type === "imageGeneration" ? m.generated_image() : item.type === "collabAgentToolCall" ? ui.subagentInvocation : getToolItemLabel(item)}</span>
+    <span class="wb-tool-summary">{item.type === "imageGeneration" ? getImageGenerationPrompt(item) ?? "" : getToolItemSummary(item)}</span>
+    <span class="wb-tool-status" class:wb-tool-failed={failed}>
+      {#if failed}失败{:else if done}完成{:else if ["inprogress", "running", "started"].includes(status)}<RefreshCw size={11} class="animate-spin" />运行中{:else}{String(item.status ?? "")}{/if}
+    </span>
+  </button>
+{/snippet}
+
 {#snippet renderTurnItem(turnId: string, item: CodexItem, stickyLevel = 0)}
+  {@const compactProcess = workbenchEnabled && isTurnRunning(turnId)}
   {#if item.type === "agentMessage"}
-    <div class="space-y-2 group/agent-message">
-      <div class="flex justify-end opacity-0 group-hover/agent-message:opacity-100 transition-opacity">
+    <div class="space-y-2 group/agent-message" class:wb-live-commentary={compactProcess}>
+      {#if !compactProcess}<div class="flex justify-end opacity-0 group-hover/agent-message:opacity-100 transition-opacity">
         <button class="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors" onclick={() => void copyMessageText(String(item.text ?? ""))} title={ui.copyReply} type="button"><Copy size={13} /></button>
-      </div>
-      <div class="prose prose-sm max-w-none text-gray-800 leading-relaxed animate-in fade-in slide-in-from-left-2 duration-700"><MarkdownMessage expandLabel={ui.showFullMessage} maxInitialChars={largeMarkdownInitialChars} on:openLocalPath={(event: CustomEvent<{ href: string }>) => openFileFromMessage(event.detail.href)} text={String(item.text ?? "")} /></div>
+      </div>{/if}
+      <div class="prose prose-sm max-w-none text-gray-800 leading-relaxed animate-in fade-in slide-in-from-left-2 duration-700"><MarkdownMessage expandLabel={ui.showFullMessage} maxInitialChars={compactProcess ? null : largeMarkdownInitialChars} on:openLocalPath={(event: CustomEvent<{ href: string }>) => openFileFromMessage(event.detail.href)} text={String(item.text ?? "")} /></div>
     </div>
   {:else if item.type === "imageGeneration"}
     {@const imageSrc = getImageGenerationSource(item)}
     {@const imagePrompt = getImageGenerationPrompt(item)}
     {@const savedPath = getImageGenerationSavedPath(item)}
-    <div class="turn-card-shell overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm">
+    <div class="turn-card-shell overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm" class:wb-compact-tool={compactProcess}>
+      {#if compactProcess}
+        {@render renderCompactToolHeader(turnId, item)}
+      {:else}
       <div class="turn-card-header turn-card-header--neutral flex items-center justify-between gap-3 border-b border-sky-100 px-4 py-3" data-sticky-level={stickyLevel}>
         <div class="flex min-w-0 items-center gap-3">
           <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-sky-100 bg-sky-50 text-sky-700">
@@ -17889,7 +17913,10 @@
           </div>
         {/if}
       </div>
-      <div class="space-y-3 bg-sky-50/40 p-3">
+      {/if}
+      {#if !compactProcess || isItemExpanded(turnId, item.id)}
+      <div class="space-y-3 bg-sky-50/40 p-3" class:wb-compact-tool-detail={compactProcess}>
+        {#if compactProcess && imageSrc}<a class="wb-image-download" download={getImageGenerationDownloadName(item)} href={imageSrc}><Download size={12} />{m.save()}</a>{/if}
         {#if imageSrc}
           <div class="overflow-hidden rounded-2xl border border-sky-100 bg-white">
             <img alt={imagePrompt ?? m.generated_image()} class="block h-auto max-h-[34rem] w-full object-contain" loading="lazy" src={imageSrc} />
@@ -17923,9 +17950,20 @@
           <p class="truncate px-1 text-[11px] text-gray-500">{savedPath}</p>
         {/if}
       </div>
+      {/if}
     </div>
   {:else if item.type === "imageView"}
     {@const imagePath = getImageViewPath(item)}
+    {#if compactProcess}
+      <div class="turn-card-shell wb-compact-tool border border-gray-200 overflow-hidden">
+        {@render renderCompactToolHeader(turnId, item)}
+        {#if isItemExpanded(turnId, item.id)}
+          <div class="wb-compact-tool-detail p-3">
+            {#if imagePath}<button class="wb-image-download break-all text-left" type="button" onclick={() => openFileTab(imagePath)}><FileText size={12} />{imagePath}</button>{/if}
+          </div>
+        {/if}
+      </div>
+    {:else}
     <div class="turn-card-shell overflow-hidden rounded-2xl border border-sky-100 bg-white shadow-sm">
       <div class="turn-card-header turn-card-header--neutral flex items-center justify-between gap-3 border-b border-sky-100 px-4 py-3" data-sticky-level={stickyLevel}>
         <div class="flex min-w-0 items-center gap-3">
@@ -17951,9 +17989,23 @@
         {/if}
       </div>
     </div>
+    {/if}
   {:else if item.type === "enteredReviewMode" || item.type === "exitedReviewMode"}
     {@render renderReviewModeItem(item, stickyLevel)}
-  {:else if item.type === "reasoning"}
+  {:else if item.type === "reasoning" && !isInternalTranscriptItem(item)}
+    {#if compactProcess}
+      <div class="wb-live-reasoning">
+        <span class="wb-reasoning-label">推理摘要</span>
+        {#if String(item.text ?? "").trim()}
+          <MarkdownMessage compact on:openLocalPath={(event: CustomEvent<{ href: string }>) => openFileFromMessage(event.detail.href)} text={String(item.text)} />
+        {/if}
+        {#if Array.isArray(item.summary)}
+          {#each item.summary.filter((entry) => String(entry).trim()) as summaryEntry, index (`${item.id}:summary:${index}`)}
+            <MarkdownMessage compact on:openLocalPath={(event: CustomEvent<{ href: string }>) => openFileFromMessage(event.detail.href)} text={summaryEntry} />
+          {/each}
+        {/if}
+      </div>
+    {:else}
     <div class="turn-card-shell overflow-hidden rounded-2xl border border-amber-100 bg-amber-50/40 shadow-sm">
       <div class="turn-card-header turn-card-header--amber flex items-start gap-3 border-b border-amber-100 px-4 py-3" data-sticky-level={stickyLevel}>
         <div class="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-amber-100 bg-white text-amber-600">
@@ -17969,7 +18021,6 @@
         </div>
       </div>
       <div class="space-y-3 bg-white/85 px-4 py-3">
-        {#if !String(item.text ?? "").trim() && !(Array.isArray(item.summary) && item.summary.some(entry=>String(entry).trim()))}<p class="wb-reason-empty">模型未提供可显示的推理摘要。</p>{/if}
         {#if String(item.text ?? "").trim()}
           <div class="rounded-xl border border-amber-100 bg-white px-3 py-3">
             <MarkdownMessage compact expandLabel={ui.showFullMessage} maxInitialChars={compactMarkdownInitialChars} on:openLocalPath={(event: CustomEvent<{ href: string }>) => openFileFromMessage(event.detail.href)} text={String(item.text ?? "")} />
@@ -17986,6 +18037,7 @@
         {/if}
       </div>
     </div>
+    {/if}
   {:else if item.type === "plan"}
     <div class="turn-card-shell w-full min-w-0 overflow-hidden rounded-2xl border border-amber-100 bg-amber-50/25 shadow-sm">
       <div class="turn-card-header turn-card-header--amber flex items-center gap-3 border-b border-amber-100 px-4 py-2.5" data-sticky-level={stickyLevel}>
@@ -18021,7 +18073,10 @@
       </div>
     </div>
   {:else if ["commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "webSearch"].includes(item.type)}
-    <div class="turn-card-shell border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+    <div class="turn-card-shell border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow" class:wb-compact-tool={compactProcess}>
+      {#if compactProcess}
+        {@render renderCompactToolHeader(turnId, item)}
+      {:else}
       <button class="turn-card-header turn-card-header--neutral flex w-full items-center justify-between gap-2.5 px-3 py-2.25 hover:bg-gray-50 transition-colors" data-sticky-level={stickyLevel} onclick={() => void toggleToolItem(turnId, item.id)}>
         <div class="flex min-w-0 flex-1 items-center gap-2.5">
           <div class="shrink-0 rounded-lg bg-gray-100 p-1.5 text-gray-500">
@@ -18047,11 +18102,14 @@
           <ChevronDown size={14} class="text-gray-400 {isItemExpanded(turnId, item.id) ? 'rotate-180' : ''} transition-transform" />
         </div>
       </button>
-      {#if Array.isArray(item.progressMessages) && item.progressMessages.length}<pre class="wb-work-preview">{item.progressMessages.join("\n")}</pre>{/if}
-      {#if item.type === "fileChange" && item.aggregatedOutput}<pre class="wb-work-preview">{String(item.aggregatedOutput)}</pre>{/if}
-      {#if workbenchEnabled && item.type === "commandExecution" && !isItemExpanded(turnId,item.id)}<pre class="wb-work-preview">{Array.isArray(item.command)?item.command.join(" "):String(item.command??"")}{item.aggregatedOutput ? `\n${String(item.aggregatedOutput).slice(-1500)}` : ""}</pre>{/if}
+      {/if}
+      {#if !compactProcess && Array.isArray(item.progressMessages) && item.progressMessages.length}<pre class="wb-work-preview">{item.progressMessages.join("\n")}</pre>{/if}
+      {#if !compactProcess && item.type === "fileChange" && item.aggregatedOutput}<pre class="wb-work-preview">{String(item.aggregatedOutput)}</pre>{/if}
+      {#if workbenchEnabled && !compactProcess && item.type === "commandExecution" && !isItemExpanded(turnId,item.id)}<pre class="wb-work-preview">{Array.isArray(item.command)?item.command.join(" "):String(item.command??"")}{item.aggregatedOutput ? `\n${String(item.aggregatedOutput).slice(-1500)}` : ""}</pre>{/if}
       {#if isItemExpanded(turnId, item.id)}
         <div class="turn-card-expand p-0 border-t border-gray-100" transition:slide|local={{ duration: 220 }}>
+          {#if compactProcess && Array.isArray(item.progressMessages) && item.progressMessages.length}<pre class="wb-work-preview">{item.progressMessages.join("\n")}</pre>{/if}
+          {#if compactProcess && item.type === "fileChange" && item.aggregatedOutput}<pre class="wb-work-preview">{String(item.aggregatedOutput)}</pre>{/if}
           {#if isItemDetailLoading(turnId, item.id)}
             {#if item.type === "fileChange"}
               {@render renderDiffLoadingCard(ui.computingDiffs)}
@@ -18080,20 +18138,26 @@
       {/if}
     </div>
   {:else if item.type === "collabAgentToolCall"}
-    <div class="turn-card-shell border border-amber-200 rounded-2xl bg-white overflow-hidden shadow-sm group">
+    <div class="turn-card-shell border border-amber-200 rounded-2xl bg-white overflow-hidden shadow-sm group" class:wb-compact-tool={compactProcess}>
+      {#if compactProcess}
+        {@render renderCompactToolHeader(turnId, item)}
+      {:else}
       <div class="turn-card-header turn-card-header--amber flex items-center justify-between gap-3 px-3 py-2.25" data-sticky-level={stickyLevel}>
         <div class="flex items-center gap-2.5"><div class="rounded-lg border border-amber-200 bg-white p-1.5 text-amber-600 shadow-sm transition-all group-hover:bg-amber-600 group-hover:text-white"><Bot size={15} /></div><div><h4 class="text-[11px] font-bold leading-tight text-gray-900">{ui.subagentInvocation}</h4><div class="mt-0.5 flex items-center gap-1.5"><span class="text-[10px] font-bold uppercase tracking-widest text-amber-600">{item.tool}</span><span class="h-1 w-1 rounded-full bg-amber-200"></span><span class="text-[10px] font-medium uppercase tracking-tighter text-gray-500">{item.status}</span></div></div></div>
         {#if getPrimarySubagentThreadId(item)}<button class="rounded-md border border-amber-200 bg-white px-2.5 py-1 text-[10px] font-bold text-amber-700 shadow-sm transition-all hover:bg-amber-600 hover:text-white" onclick={() => void openSubagentThread(getPrimarySubagentThreadId(item) ?? "")}>{ui.viewThread}</button>{/if}
       </div>
-      {#if item.prompt}<div class="border-t border-amber-100 bg-white p-3"><p class="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-400">{ui.instructions}</p><pre class="text-[11px] font-mono italic leading-relaxed text-gray-600 whitespace-pre-wrap">{String(item.prompt)}</pre></div>{/if}
+      {/if}
+      {#if compactProcess && isItemExpanded(turnId, item.id) && getPrimarySubagentThreadId(item)}<button class="wb-image-download px-3 py-1" type="button" onclick={() => void openSubagentThread(getPrimarySubagentThreadId(item) ?? "")}>{ui.viewThread}</button>{/if}
+      {#if item.prompt && (!compactProcess || isItemExpanded(turnId, item.id))}<div class="border-t border-amber-100 bg-white p-3" class:wb-compact-tool-detail={compactProcess}><p class="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-gray-400">{ui.instructions}</p><pre class="text-[11px] font-mono italic leading-relaxed text-gray-600 whitespace-pre-wrap">{String(item.prompt)}</pre></div>{/if}
     </div>
   {/if}
 {/snippet}
 
 {#snippet renderTurnEntry(turnId: string, entry: RenderableTurnEntry, stickyLevel = 0)}
+  {@const compactProcess = workbenchEnabled && isTurnRunning(turnId)}
   {#if entry.kind === "item"}{@render renderTurnItem(turnId, entry.item, stickyLevel)}
   {:else if entry.kind === "readGroup"}
-    <div class="turn-card-shell border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm">
+    <div class="turn-card-shell border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm" class:wb-compact-group={compactProcess}>
       <button class="turn-card-header turn-card-header--neutral flex w-full items-center justify-between gap-2.5 px-3 py-2.25 hover:bg-gray-50 transition-colors" data-sticky-level={stickyLevel} onclick={() => void toggleReadOnlyCommandGroup(turnId, entry.key, entry.items)}><div class="flex min-w-0 flex-1 items-center gap-2.5"><div class="shrink-0 rounded-lg bg-gray-100 p-1.5 text-gray-400">{#if getReadOnlyCommandGroupKind(entry.items) === "git"}<GitBranch size={14} />{:else}<Search size={14} />{/if}</div><div class="min-w-0 flex-1 text-left"><h4 class="truncate text-[11px] font-bold leading-tight text-gray-900">{getReadOnlyCommandGroupLabel(entry.items)}</h4><p class="mt-0.5 truncate text-[10px] font-medium text-gray-500">{summarizeReadOnlyCommandGroup(entry.items)}</p></div></div><div class="flex shrink-0 items-center gap-2"><span class="px-1.5 py-0.5 bg-gray-50 text-[9px] font-bold text-gray-400 rounded uppercase tracking-tighter">{ui.opsCount(entry.items.length)}</span><ChevronDown size={14} class="text-gray-400 {isItemExpanded(turnId, entry.key) ? 'rotate-180' : ''} transition-transform" /></div></button>
       {#if isItemExpanded(turnId, entry.key)}
         <div class="turn-card-expand border-t border-gray-100 bg-gray-50/30" transition:slide|local={{ duration: 220 }}>{#if isItemDetailLoading(turnId, entry.key)}<div class="flex justify-center p-5 text-xs italic text-gray-400 animate-pulse">{ui.readingFileData}</div>
@@ -18101,7 +18165,7 @@
       {/if}
     </div>
   {:else}
-    <div class="turn-card-shell border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm">
+    <div class="turn-card-shell border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm" class:wb-compact-group={compactProcess}>
       <div class="turn-card-header turn-card-header--neutral flex items-center gap-2 pr-3" data-sticky-level={stickyLevel}>
         <button class="min-w-0 flex-1 flex items-center justify-between px-3 py-2.25 hover:bg-gray-50 transition-colors" onclick={() => void toggleFileChangeGroup(turnId, entry.key, entry.items)} type="button"><div class="flex min-w-0 items-center gap-2.5"><div class="shrink-0 rounded-lg bg-gray-100 p-1.5 text-gray-400"><FileDiff size={14} /></div><div class="min-w-0 text-left"><h4 class="text-[11px] font-bold leading-tight text-gray-900">{getFileChangeGroupLabel(entry.items)}</h4><p class="mt-0.5 truncate text-[10px] font-medium text-gray-500">{summarizeFileChangeGroup(entry.items)}</p></div></div><div class="flex shrink-0 items-center gap-2"><span class="px-1.5 py-0.5 bg-gray-50 text-[9px] font-bold text-gray-400 rounded uppercase tracking-tighter">{getFileChangeGroupSummaryEntries(entry.items).length} {m.files_count_label()}</span><ChevronDown size={14} class="text-gray-400 {isItemExpanded(turnId, entry.key) ? 'rotate-180' : ''} transition-transform" /></div></button>
         {#if getFileChangeGroupViews(entry.items).length > 0}
