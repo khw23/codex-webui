@@ -513,8 +513,8 @@
   color:var(--ink,#35434e);
 }
 
-/* Live turns stay compact. Completed turns retain the existing presentation. */
-.workbench-mode .wb-live-process > :not([hidden]) ~ :not([hidden]) {
+/* Work details stay compact both during execution and when reopened later. */
+.workbench-mode .wb-process > :not([hidden]) ~ :not([hidden]) {
   margin-block-start:8px;
   margin-block-end:0;
 }
@@ -603,7 +603,7 @@
   font-size:11px;
 }
 
-.wb-live-reasoning {
+.wb-process-reasoning {
   padding:2px 0 2px 11px;
   border-left:2px solid var(--line,#dce1e7);
   color:var(--muted,#697582);
@@ -616,14 +616,14 @@
   font-weight:550;
 }
 
-.wb-live-reasoning .markdown-body,
-.wb-live-commentary .markdown-body {
+.wb-process-reasoning .markdown-body,
+.wb-process-commentary .markdown-body {
   font-size:13px;
   line-height:1.65;
 }
 
-.wb-live-reasoning .markdown-body p,
-.wb-live-commentary .markdown-body p {
+.wb-process-reasoning .markdown-body p,
+.wb-process-commentary .markdown-body p {
   margin-block:4px;
 }
 
@@ -660,7 +660,7 @@
   background:transparent;
 }
 
-.workbench-mode .wb-live-process > .turn-card-shell:not(.wb-compact-tool):not(.wb-compact-group) > .turn-card-header {
+.workbench-mode .wb-process > .turn-card-shell:not(.wb-compact-tool):not(.wb-compact-group) > .turn-card-header {
   padding:6px 10px;
   gap:8px;
 }
